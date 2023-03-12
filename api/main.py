@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Literal
 
+import requests
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Request, Response, BackgroundTasks
@@ -29,6 +30,30 @@ TEMPLATES = Jinja2Templates(directory="resources")
 with open("resources/manifest.json") as file:
     manifest = json.load(file)
 
+with open("config.json") as file:
+    config = json.load(file)
+
+real_debrid_token = None
+if "real_debrid" in config:
+    real_debrid_client_id = config["real_debrid"]["client_id"]
+    real_debrid_client_secret = config["real_debrid"]["client_secret"]
+    real_debrid_username = config["real_debrid"]["username"]
+    real_debrid_password = config["real_debrid"]["password"]
+    real_debrid_token_url = "https://api.real-debrid.com/oauth/v2/token"
+
+    data = {
+        "grant_type": "password",
+        "client_id": real_debrid_client_id,
+        "client_secret": real_debrid_client_secret,
+        "username": real_debrid_username,
+        "password": real_debrid_password
+    }
+
+    response = requests.post(real_debrid_token_url, data=data)
+    if response.status_code == 200:
+        real_debrid_token = response.json()["access_token"]
+    else:
+        logging.warning(f"Failed to get Real Debrid access token: {response.content}")
 
 @app.on_event("startup")
 async def init_db():
@@ -79,51 +104,4 @@ async def get_manifest(response: Response):
 
 @app.get("/catalog/movie/{catalog_id}.json", response_model=schemas.Movie)
 @app.get("/catalog/movie/{catalog_id}/skip={skip}.json", response_model=schemas.Movie)
-@app.get("/catalog/series/{catalog_id}.json", response_model=schemas.Movie)
-@app.get("/catalog/series/{catalog_id}/skip={skip}.json", response_model=schemas.Movie)
-async def get_catalog(response: Response, catalog_id: str, skip: int = 0):
-    response.headers.update({"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*"})
-    movies = schemas.Movie()
-    movies.metas.extend(await crud.get_movies_meta(catalog_id, skip))
-    return movies
-
-
-@app.get("/meta/movie/{meta_id}.json")
-async def get_meta(meta_id: str, response: Response):
-    response.headers.update({"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*"})
-    return await crud.get_movie_meta(meta_id)
-
-
-@app.get("/stream/movie/{video_id}.json", response_model=schemas.Streams)
-async def get_stream(video_id: str, response: Response):
-    response.headers.update({"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*"})
-    streams = schemas.Streams()
-    streams.streams.extend(await crud.get_movie_streams(video_id))
-    return streams
-
-
-@app.post("/scraper")
-def run_scraper(
-    background_tasks: BackgroundTasks,
-    language: Literal["tamil", "malayalam", "telugu", "hindi", "kannada", "english"] = "tamil",
-    video_type: Literal["hdrip", "tcrip", "dubbed", "series"] = "hdrip",
-    pages: int = 1,
-    start_page: int = 1,
-    is_scrape_home: bool = False,
-):
-    background_tasks.add_task(scrap.run_scraper, language, video_type, pages, start_page, is_scrape_home)
-    return {"message": "Scraping in background..."}
-
-
-@app.get("/meta/series/{meta_id}.json")
-async def get_series_meta(meta_id: str, response: Response):
-    response.headers.update({"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*"})
-    return await crud.get_series_meta(meta_id)
-
-
-@app.get("/stream/series/{video_id}:{season}:{episode}.json", response_model=schemas.Streams)
-async def get_series_streams(video_id: str, season: int, episode: str, response: Response):
-    response.headers.update({"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*"})
-    streams = schemas.Streams()
-    streams.streams.extend(await crud.get_series_streams(video_id, season, episode))
-    return streams
+@app.get("/catalog/series/{catalog_id}.json", response_model
